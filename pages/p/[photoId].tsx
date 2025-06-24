@@ -1,26 +1,36 @@
-import type { GetStaticProps, NextPage } from "next";
-import Head from "next/head";
-import { useRouter } from "next/router";
-import Carousel from "../../components/Carousel";
-import getResults from "../../utils/cachedImages";
-import cloudinary from "../../utils/cloudinary";
-import getBase64ImageUrl from "../../utils/generateBlurPlaceholder";
-import type { ImageProps } from "../../utils/types";
+import React from 'react';
+import type { GetStaticProps, GetStaticPaths, NextPage } from 'next/js';
+import Head from 'next/head';
+import { useRouter } from 'next/router';
+import type { ImageProps } from '@/types/image';
+import { Carousel } from '@/components/modal/Carousel';
+import { getImagesWithBlurData, getSingleImageWithBlur } from '@/utils/imageService';
+import { buildCloudinaryUrl, IMAGE_SIZES } from '@/utils/imageUtils';
 
-const Home: NextPage = ({ currentPhoto }: { currentPhoto: ImageProps }) => {
+interface PhotoPageProps {
+  currentPhoto: ImageProps;
+}
+
+const PhotoPage: NextPage<PhotoPageProps> = ({ currentPhoto }) => {
   const router = useRouter();
   const { photoId } = router.query;
-  let index = Number(photoId);
+  const index = Number(photoId);
 
-  const currentPhotoUrl = `https://res.cloudinary.com/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/image/upload/c_scale,w_2560/${currentPhoto.public_id}.${currentPhoto.format}`;
+  const currentPhotoUrl = buildCloudinaryUrl(
+    currentPhoto.public_id,
+    currentPhoto.format,
+    IMAGE_SIZES.XLARGE
+  );
 
   return (
     <>
       <Head>
-        <title>Next.js Conf 2022 Photos</title>
+        <title>{`Photo ${index + 1} - galeri.losa.dev`}</title>
         <meta property="og:image" content={currentPhotoUrl} />
         <meta name="twitter:image" content={currentPhotoUrl} />
+        <meta name="twitter:card" content="summary_large_image" />
       </Head>
+      
       <main className="mx-auto max-w-[1960px] p-4">
         <Carousel currentPhoto={currentPhoto} index={index} />
       </main>
@@ -28,50 +38,52 @@ const Home: NextPage = ({ currentPhoto }: { currentPhoto: ImageProps }) => {
   );
 };
 
-export default Home;
+export const getStaticProps: GetStaticProps<PhotoPageProps> = async (context) => {
+  try {
+    const photoId = Number(context.params?.photoId);
+    const currentPhoto = await getSingleImageWithBlur(photoId);
 
-export const getStaticProps: GetStaticProps = async (context) => {
-  const results = await getResults();
+    if (!currentPhoto) {
+      return {
+        notFound: true,
+      };
+    }
 
-  let reducedResults: ImageProps[] = [];
-  let i = 0;
-  for (let result of results.resources) {
-    reducedResults.push({
-      id: i,
-      height: result.height,
-      width: result.width,
-      public_id: result.public_id,
-      format: result.format,
-    });
-    i++;
+    return {
+      props: {
+        currentPhoto,
+      },
+      revalidate: 3600,
+    };
+  } catch (error) {
+    console.error('Failed to fetch photo:', error);
+    
+    return {
+      notFound: true,
+    };
   }
-
-  const currentPhoto = reducedResults.find(
-    (img) => img.id === Number(context.params.photoId),
-  );
-  currentPhoto.blurDataUrl = await getBase64ImageUrl(currentPhoto);
-
-  return {
-    props: {
-      currentPhoto: currentPhoto,
-    },
-  };
 };
 
-export async function getStaticPaths() {
-  const results = await cloudinary.v2.search
-    .expression(`folder:${process.env.CLOUDINARY_FOLDER}/*`)
-    .sort_by("public_id", "desc")
-    .max_results(400)
-    .execute();
+export const getStaticPaths: GetStaticPaths = async () => {
+  try {
+    const images = await getImagesWithBlurData();
+    
+    const paths = images.map((_, index) => ({
+      params: { photoId: index.toString() },
+    }));
 
-  let fullPaths = [];
-  for (let i = 0; i < results.resources.length; i++) {
-    fullPaths.push({ params: { photoId: i.toString() } });
+    return {
+      paths,
+      fallback: 'blocking',
+    };
+  } catch (error) {
+    console.error('Failed to generate static paths:', error);
+    
+    return {
+      paths: [],
+      fallback: 'blocking',
+    };
   }
+};
 
-  return {
-    paths: fullPaths,
-    fallback: false,
-  };
-}
+export default PhotoPage;

@@ -1,112 +1,75 @@
-import type { NextPage } from "next";
-import Head from "next/head";
-import Image from "next/image";
-import Link from "next/link";
-import { useRouter } from "next/router";
-import { useEffect, useRef } from "react";
-import Bridge from "../components/Icons/Bridge";
-import Logo from "../components/Icons/Logo";
-import Modal from "../components/Modal";
-import cloudinary from "../utils/cloudinary";
-import getBase64ImageUrl from "../utils/generateBlurPlaceholder";
-import type { ImageProps } from "../utils/types";
-import { useLastViewedPhoto } from "../utils/useLastViewedPhoto";
+import React, { useCallback, useMemo } from 'react';
+import type { GetStaticProps, NextPage } from 'next/js';
+import Head from 'next/head';
+import { useRouter } from 'next/router';
+import type { ImageProps } from '@/types/image';
+import { useLastViewedPhoto } from '@/hooks/useLastViewedPhoto';
+import { ImageGrid } from '@/components/gallery/ImageGrid';
+import { Modal } from '@/components/modal/Modal';
+import { getImagesWithBlurData } from '@/utils/imageService';
 
-const Home: NextPage = ({ images }: { images: ImageProps[] }) => {
+interface HomeProps {
+  images: ImageProps[];
+}
+
+const Home: NextPage<HomeProps> = ({ images }) => {
   const router = useRouter();
   const { photoId } = router.query;
   const [lastViewedPhoto, setLastViewedPhoto] = useLastViewedPhoto();
 
-  const lastViewedPhotoRef = useRef<HTMLAnchorElement>(null);
-
-  useEffect(() => {
-    // This effect keeps track of the last viewed photo in the modal to keep the index page in sync when the user navigates back
-    if (lastViewedPhoto && !photoId) {
-      lastViewedPhotoRef.current.scrollIntoView({ block: "center" });
-      setLastViewedPhoto(null);
+  const handleModalClose = useCallback(() => {
+    if (photoId) {
+      setLastViewedPhoto(String(photoId));
     }
-  }, [photoId, lastViewedPhoto, setLastViewedPhoto]);
+  }, [photoId, setLastViewedPhoto]);
+
+  const memoizedImageGrid = useMemo(
+    () => (
+      <ImageGrid
+        images={images}
+        lastViewedPhoto={lastViewedPhoto}
+        onSetLastViewedPhoto={setLastViewedPhoto}
+      />
+    ),
+    [images, lastViewedPhoto, setLastViewedPhoto]
+  );
 
   return (
     <>
       <Head>
         <title>galeri.losa.dev</title>
+        <meta name="description" content="A modern photo gallery built with Next.js" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
+      
       <main className="mx-auto max-w-[1960px] p-4">
-        {photoId && (
-          <Modal
-            images={images}
-            onClose={() => {
-              setLastViewedPhoto(photoId);
-            }}
-          />
-        )}
-        <div className="columns-1 gap-4 sm:columns-2 xl:columns-3 2xl:columns-4">
-          {images.map(({ id, public_id, format, blurDataUrl }) => (
-            <Link
-              key={id}
-              href={`/?photoId=${id}`}
-              as={`/p/${id}`}
-              ref={id === Number(lastViewedPhoto) ? lastViewedPhotoRef : null}
-              shallow
-              className="after:content group relative mb-5 block w-full cursor-zoom-in after:pointer-events-none after:absolute after:inset-0 after:rounded-lg after:shadow-highlight"
-            >
-              <Image
-                alt="Fotoğraf"
-                className="transform rounded-lg brightness-90 transition will-change-auto group-hover:brightness-110"
-                style={{ transform: "translate3d(0, 0, 0)" }}
-                placeholder="blur"
-                blurDataURL={blurDataUrl}
-                src={`https://res.cloudinary.com/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/image/upload/c_scale,w_720/${public_id}.${format}`}
-                width={720}
-                height={480}
-                sizes="(max-width: 640px) 100vw,
-                  (max-width: 1280px) 50vw,
-                  (max-width: 1536px) 33vw,
-                  25vw"
-              />
-            </Link>
-          ))}
-        </div>
+        {photoId && <Modal images={images} onClose={handleModalClose} />}
+        {memoizedImageGrid}
       </main>
     </>
   );
 };
 
+export const getStaticProps: GetStaticProps<HomeProps> = async () => {
+  try {
+    const images = await getImagesWithBlurData();
+    
+    return {
+      props: {
+        images,
+      },
+      revalidate: 3600, // Revalidate every hour
+    };
+  } catch (error) {
+    console.error('Failed to fetch images:', error);
+    
+    return {
+      props: {
+        images: [],
+      },
+      revalidate: 60, // Retry more frequently on error
+    };
+  }
+};
+
 export default Home;
-
-export async function getStaticProps() {
-  const results = await cloudinary.v2.search
-    .expression(`folder:${process.env.CLOUDINARY_FOLDER}/*`)
-    .sort_by("public_id", "desc")
-    .max_results(400)
-    .execute();
-  let reducedResults: ImageProps[] = [];
-
-  let i = 0;
-  for (let result of results.resources) {
-    reducedResults.push({
-      id: i,
-      height: result.height,
-      width: result.width,
-      public_id: result.public_id,
-      format: result.format,
-    });
-    i++;
-  }
-
-  const blurImagePromises = results.resources.map((image: ImageProps) => {
-    return getBase64ImageUrl(image);
-  });
-  const imagesWithBlurDataUrls = await Promise.all(blurImagePromises);
-
-  for (let i = 0; i < reducedResults.length; i++) {
-    reducedResults[i].blurDataUrl = imagesWithBlurDataUrls[i];
-  }
-
-  return {
-    props: {
-      images: reducedResults,
-    },
-  };
-}

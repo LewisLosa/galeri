@@ -1,33 +1,25 @@
-import { Dialog } from "@headlessui/react";
-import { motion } from "framer-motion";
-import { useRouter } from "next/router";
-import { useRef, useState } from "react";
-import useKeypress from "react-use-keypress";
-import type { ImageProps } from "../utils/types";
-import SharedModal from "./SharedModal";
+import React, { memo, useState, useCallback } from 'react';
+import { Dialog } from '@headlessui/react';
+import { motion } from 'framer-motion';
+import { useRouter } from 'next/router';
+import type { ModalProps } from '@/types/modal';
+import { useKeyPress } from '@/hooks/useKeyPress';
+import { SharedModal } from './SharedModal';
 
-export default function Modal({
-  images,
-  onClose,
-}: {
-  images: ImageProps[];
-  onClose?: () => void;
-}) {
-  let overlayRef = useRef();
+export const Modal = memo<ModalProps>(({ images, onClose }) => {
   const router = useRouter();
-
   const { photoId } = router.query;
-  let index = Number(photoId);
+  const index = Number(photoId);
 
   const [direction, setDirection] = useState(0);
   const [curIndex, setCurIndex] = useState(index);
 
-  function handleClose() {
-    router.push("/", undefined, { shallow: true });
-    onClose();
-  }
+  const handleClose = useCallback(() => {
+    router.push('/', undefined, { shallow: true });
+    onClose?.();
+  }, [router, onClose]);
 
-  function changePhotoId(newVal: number) {
+  const changePhotoId = useCallback((newVal: number) => {
     if (newVal > index) {
       setDirection(1);
     } else {
@@ -39,32 +31,34 @@ export default function Modal({
         query: { photoId: newVal },
       },
       `/p/${newVal}`,
-      { shallow: true },
+      { shallow: true }
     );
-  }
+  }, [index, router]);
 
-  useKeypress("ArrowRight", () => {
+  const handleArrowRight = useCallback(() => {
     if (index + 1 < images.length) {
       changePhotoId(index + 1);
     }
-  });
+  }, [index, images.length, changePhotoId]);
 
-  useKeypress("ArrowLeft", () => {
+  const handleArrowLeft = useCallback(() => {
     if (index > 0) {
       changePhotoId(index - 1);
     }
-  });
+  }, [index, changePhotoId]);
+
+  useKeyPress('ArrowRight', handleArrowRight);
+  useKeyPress('ArrowLeft', handleArrowLeft);
+  useKeyPress('Escape', handleClose);
 
   return (
     <Dialog
       static
       open={true}
       onClose={handleClose}
-      initialFocus={overlayRef}
       className="fixed inset-0 z-10 flex items-center justify-center"
     >
       <Dialog.Overlay
-        ref={overlayRef}
         as={motion.div}
         key="backdrop"
         className="fixed inset-0 z-30 bg-black/70 backdrop-blur-2xl"
@@ -81,4 +75,6 @@ export default function Modal({
       />
     </Dialog>
   );
-}
+});
+
+Modal.displayName = 'Modal';
